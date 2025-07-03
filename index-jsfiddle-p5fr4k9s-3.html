@@ -140,9 +140,7 @@
         v-model="activeTodos" 
         tag="ol" 
         :options="dragOptions"
-        @start="onDragStart"
         @end="onDragEnd"
-        @change="onDragChange"
       >
         <li v-for="todo in activeTodos" :key="todo.id">
           <label :for="'todo-item-' + todo.id">
@@ -175,9 +173,7 @@
         v-model="completedTodos" 
         tag="ol" 
         :options="dragOptions"
-        @start="onDragStart"
         @end="onDragEnd"
-        @change="onDragChange"
       >
         <li v-for="todo in completedTodos" :key="todo.id">
           <label :for="'completed-item-' + todo.id">
@@ -335,13 +331,8 @@
         },
         clearStorage() {
           localStorage.removeItem(STORAGE_KEY);
-          console.log('Storage cleared');
-        },
-        onDragStart(evt) {
-          console.log('Drag started:', evt);
         },
         onDragEnd(evt) {
-          console.log('Drag ended:', evt);
           this.activeDragOver = false;
           this.completedDragOver = false;
         }
