@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>JSFiddle gq26t83k</title>
+
+  <style>
+    .card-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  line-clamp: 4;
+  overflow: hidden;
+}
+  </style>
+
+  <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css">
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/lodash.js/4.17.21/lodash.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/handlebars.js/4.7.7/handlebars.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.29.1/moment.min.js"></script>
+</head>
+<body>
+  <section class="py-5 text-center container">
+  <div class="row py-lg-5">
+    <div class="col-lg-6 col-md-8 mx-auto">
+      <h1 class="fw-light">RSS feeds</h1>
+      <p class="lead text-muted">Click to load feed</p>
+      <div class="btn-group">
+        <a href="#" class="btn btn-outline-secondary" data-url="https://feeds.bbci.co.uk/news/rss.xml">BBC News</a>
+        <a href="#" class="btn btn-outline-secondary" data-url="https://www.buzzfeed.com/uk/index.xml">Buzzfeed</a>
+        <a href="#" class="btn btn-primary" data-url="https://fliplet.com/feed">Fliplet</a>
+        <a href="#" class="btn btn-outline-secondary" data-url="https://www.ft.com/news-feed">FT</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Pagination -->
+<section class="py-5 text-center container">
+  <div class="row py-lg-5">
+    <nav>
+      <ul class="pagination">
+        <li class="page-item disabled">
+          <a class="page-link">Previous</a>
+        </li>
+        <li class="page-item active"><a class="page-link" href="#">1</a></li>
+        <li class="page-item">
+          <a class="page-link" href="#">2</a>
+        </li>
+        <li class="page-item"><a class="page-link" href="#">3</a></li>
+        <li class="page-item">
+          <a class="page-link" href="#">Next</a>
+        </li>
+      </ul>
+    </nav>    
+  </div>
+</section>
+
+<div class="container">
+  <!-- Loading state UI -->
+  <div class="alert alert-secondary visually-hidden">Loading...</div>
+  
+  <!-- Error state UI -->
+  <div class="alert alert-danger visually-hidden">
+    <h5>Unable to load feed</h5>
+    <!-- Show error message, if applicable -->
+    Feed could not be converted, probably not a valid RSS feed.<br>
+    <small><a href="#">Open feed in a new tab</a></small>
+  </div>
+  
+  <!-- Feed (Show no more than 5 posts per page) -->
+  <div class="row row-cols-1 row-cols-sm-2 row-cols-md-3 g-3">
+  </div>
+</div>
+
+<!-- Handlebars template for feed items -->
+<script id="feed-item-template" type="text/x-handlebars-template">
+  {{#each items}}
+  <div class="col">
+    <div class="card shadow-sm h-100">
+      {{#if (getThumbnail this)}}
+      <img src="{{getThumbnail this}}" alt="{{escape title}}" class="card-img-top" style="height: 225px; object-fit: cover;" loading="lazy">
+      {{/if}}
+      <div class="card-body d-flex flex-column">
+        <h5 class="card-title">{{stripHtml (defaultValue title "Untitled")}}</h5>
+        <p class="card-text flex-grow-1">
+          <small>{{truncate (formatDescription (defaultValue description content)) 150}}</small>
+        </p>
+        <div class="mt-auto">
+          <p><a href="{{escape (defaultValue link "#")}}" target="_blank" rel="noopener noreferrer">Read more &rarr;</a></p>
+          <div class="d-flex justify-content-between align-items-center">
+            <small class="text-muted">{{formatDate pubDate}}</small>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  {{/each}}
+</script>
+
+<!-- Pagination -->
+<section class="py-5 text-center container">
+  <div class="row py-lg-5">
+    <nav aria-label="Page navigation">
+      <ul class="pagination">
+        <li class="page-item disabled">
+          <a class="page-link">Previous</a>
+        </li>
+        <li class="page-item active"><a class="page-link" href="#">1</a></li>
+        <li class="page-item">
+          <a class="page-link" href="#">2</a>
+        </li>
+        <li class="page-item"><a class="page-link" href="#">3</a></li>
+        <li class="page-item">
+          <a class="page-link" href="#">Next</a>
+        </li>
+      </ul>
+    </nav>    
+  </div>
+</section>
+
+  <script>
+    $(document).ready(function() {
+      // RSS Feed Configuration
+      const RSS_CONFIG = {
+        API_URL: 'https://api.rss2json.com/v1/api.json',
+        ITEMS_PER_PAGE: 5,
+        API_KEY: null, // Can be set if you have a rss2json.com API key
+        DEBOUNCE_DELAY: 300 // ms
+      };
+
+      // State management
+      let currentFeed = null;
+      let currentPage = 1;
+      let feedItems = [];
+      let totalPages = 1;
+      
+      // Feed cache and async operation management
+      const feedCache = new Map();
+      let currentRequest = null;
+      let requestSequence = 0;
+
+      // jQuery DOM elements
+      const $loadingAlert = $('.alert-secondary');
+      const $errorAlert = $('.alert-danger');
+      const $feedContainer = $('.row.row-cols-1');
+      const $paginationContainers = $('.pagination');
+      const $feedButtons = $('[data-url]');
+
+      // Compile Handlebars template
+      const feedItemTemplate = Handlebars.compile($('#feed-item-template').html());
+
+        // Register Handlebars helpers for data processing
+       Handlebars.registerHelper('escape', function(text) {
+         return _.escape(text || '');
+       });
+
+       Handlebars.registerHelper('defaultValue', function(...args) {
+         const values = args.slice(0, -1);
+         return values.find(val => val && val.trim && val.trim() !== '') || '';
+       });
+
+        Handlebars.registerHelper('formatDescription', function(description) {
+          if (!description) return '';
+          
+          // Create jQuery object from HTML description
+          const $description = $('<div>').html(description);
+          
+          // First, try to find the first <p> tag that has content and isn't just a link
+          const $nonEmptyP = $description.find('p').filter(function() {
+            const $p = $(this);
+            const text = $p.text().trim();
+            
+            // Skip empty paragraphs
+            if (!text) return false;
+            
+            // Skip paragraphs that only contain links
+            const $links = $p.find('a');
+
+            if ($links.length) {
+              return false;
+            }
+            
+            return !$links.length;
+          });
+
+          if ($nonEmptyP.length) {
+            return $nonEmptyP.first().text().trim();
+          }
+          
+          // If no <p> tag found, try to find <h1> tag
+          const $nonEmptyH1 = $description.find('h1').filter(function() {
+            return $(this).text().trim() !== '';
+          });
+
+          if ($nonEmptyH1.length) {
+            return $nonEmptyH1.first().text().trim();
+          }
+          
+          // Otherwise, return stripped HTML of the entire description
+          return stripHtml(description);
+        });
+
+       Handlebars.registerHelper('stripHtml', function(html) {
+         if (!html) return '';
+         return $('<div>').html(html).text();
+       });
+
+       Handlebars.registerHelper('truncate', function(text, maxLength) {
+         if (!text) return '';
+         return text.length <= maxLength ? text : text.substr(0, maxLength) + '…';
+       });
+
+       Handlebars.registerHelper('getThumbnail', function(item) {
+         return getThumbnail(item);
+       });
+
+       Handlebars.registerHelper('formatDate', function(dateString) {
+         return formatDate(dateString);
+       });
+
+      // Initialize feed reader
+      initializeFeedReader();
+
+      function initializeFeedReader() {
+        // Add click handlers to feed buttons with debouncing
+        $feedButtons.on('click', _.debounce(handleFeedButtonClick, RSS_CONFIG.DEBOUNCE_DELAY, {
+          leading: true,
+          trailing: false
+        }));
+
+        // Add pagination handlers
+        $paginationContainers.on('click', '.page-link', handlePaginationClick);
+
+        // Load default feed (Fliplet - the one with btn-primary class)
+        const $defaultButton = $('.btn-primary[data-url]');
+        if ($defaultButton.length) {
+          loadFeed($defaultButton.data('url'), $defaultButton.text().trim());
+        }
+      }
+
+      // Handle feed button clicks with smooth UX
+      function handleFeedButtonClick(event) {
+        event.preventDefault();
+        const $button = $(event.target);
+        const feedUrl = $button.data('url');
+        const feedName = $button.text().trim();
+
+        // Cancel any ongoing request
+        cancelCurrentRequest();
+
+        if ($button.hasClass('btn-primary')) {
+          return;
+        }
+
+        // Update button states with smooth transition
+        $feedButtons.removeClass('btn-primary').addClass('btn-outline-secondary');
+        $button.removeClass('btn-outline-secondary').addClass('btn-primary');
+
+        // Load the selected feed
+        loadFeed(feedUrl, feedName);
+      }
+
+      // Handle pagination clicks
+      function handlePaginationClick(event) {
+        event.preventDefault();
+        const $target = $(event.target);
+        
+        if (!$target.parent().hasClass('disabled')) {
+          const text = $target.text().trim();
+          
+          if (text === 'Previous' && currentPage > 1) {
+            currentPage--;
+            renderCurrentPage();
+          } else if (text === 'Next' && currentPage < totalPages) {
+            currentPage++;
+            renderCurrentPage();
+          } else if (!isNaN(parseInt(text))) {
+            currentPage = parseInt(text);
+            renderCurrentPage();
+          }
+        }
+      }
+
+      // Cancel current request to prevent race conditions
+      function cancelCurrentRequest() {
+        if (currentRequest) {
+          currentRequest.abort();
+          currentRequest = null;
+          console.log('Previous request cancelled');
+        }
+      }
+
+      // Load RSS feed from URL with enhanced async handling
+      function loadFeed(url, name) {
+        const currentSequence = ++requestSequence;
+        
+        try {
+          showLoading();
+          hideError();
+          
+          currentFeed = { url, name };
+          currentPage = 1;
+
+          // Check if feed is already cached
+          if (feedCache.has(url)) {
+            console.log(`Loading cached feed: ${name}`);
+            const cachedData = feedCache.get(url);
+            
+            // Use lodash to safely clone cached data
+            feedItems = _.cloneDeep(cachedData.items);
+            totalPages = cachedData.totalPages;
+            
+            hideLoading();
+            renderCurrentPage();
+            updatePagination();
+            return Promise.resolve();
+          }
+
+          // Feed not cached, fetch from API
+          console.log(`Fetching new feed: ${name}`);
+          
+          // Cancel any existing request
+          cancelCurrentRequest();
+          
+          // Create new request with enhanced error handling
+          currentRequest = $.ajax({
+            url: RSS_CONFIG.API_URL,
+            method: 'GET',
+            data: {
+              rss_url: url,
+              ...(RSS_CONFIG.API_KEY && { api_key: RSS_CONFIG.API_KEY })
+            },
+            timeout: 10000, // 10 second timeout
+            dataType: 'json'
+          });
+
+          return currentRequest
+            .done(function(data) {
+              // Check if this response is still relevant
+              if (currentSequence !== requestSequence) {
+                console.log('Response discarded - newer request in progress');
+                return;
+              }
+
+              if (data.status !== 'ok') {
+                throw new Error(data.message || 'Failed to load RSS feed');
+              }
+
+              // Process feed items with lodash
+              feedItems = data.items;
+              totalPages = Math.ceil(feedItems.length / RSS_CONFIG.ITEMS_PER_PAGE);
+              
+              // Cache the feed data
+              feedCache.set(url, {
+                items: _.cloneDeep(feedItems),
+                totalPages: totalPages,
+                loadedAt: moment().toISOString()
+              });
+              
+              hideLoading();
+              renderCurrentPage();
+              updatePagination();
+            })
+            .fail(function(xhr, status, error) {
+              // Check if this was an intentional abort
+              if (status === 'abort') {
+                return;
+              }
+              
+              // Check if this error is still relevant
+              if (currentSequence !== requestSequence) {
+                return;
+              }
+
+              let errorMessage = 'Failed to load RSS feed';
+              
+              if (status === 'timeout') {
+                errorMessage = 'Request timed out - please try again';
+              } else if (xhr.responseJSON && xhr.responseJSON.message) {
+                errorMessage = xhr.responseJSON.message;
+              } else if (error) {
+                errorMessage = error;
+              }
+
+              console.error('Error loading feed:', errorMessage);
+              hideLoading();
+              showError(errorMessage, url);
+            })
+            .always(function() {
+              currentRequest = null;
+            });
+
+        } catch (error) {
+          console.error('Unexpected error:', error);
+          hideLoading();
+          showError(error.message, url);
+          return Promise.reject(error);
+        }
+      }
+
+      
+
+      // Get thumbnail from feed item
+      function getThumbnail(item) {
+        // Try different possible thumbnail sources
+        if (item.thumbnail) return item.thumbnail;
+        if (_.get(item, 'enclosure.link') && _.get(item, 'enclosure.type', '').startsWith('image/')) {
+          return item.enclosure.link;
+        }
+        
+        // Extract first image from content/description
+        const content = item.content || item.description || '';
+        const imgMatch = content.match(/<img[^>]+src=["']([^"']+)["'][^>]*>/i);
+        if (imgMatch) return imgMatch[1];
+        
+        // Fallback to a placeholder with hash-based seed
+        const hash = Math.abs(hashCode(item.title || ''));
+        return `https://picsum.photos/seed/${hash}/300/225`;
+      }
+
+      // Render current page with smooth transitions
+      function renderCurrentPage() {
+        const startIndex = (currentPage - 1) * RSS_CONFIG.ITEMS_PER_PAGE;
+        const endIndex = startIndex + RSS_CONFIG.ITEMS_PER_PAGE;
+        const pageItems = _.slice(feedItems, startIndex, endIndex);
+
+        // Fade out, update content, fade in for smooth transition
+        $feedContainer.fadeOut(200, function() {
+          const html = feedItemTemplate({ items: pageItems });
+          $feedContainer.html(html).fadeIn(300);
+        });
+
+        updatePagination();
+      }
+
+      // Update pagination controls with lodash utilities
+      function updatePagination() {
+        $paginationContainers.each(function() {
+          const $container = $(this);
+          const $items = $container.find('.page-item');
+          
+          // Update Previous button
+          const $prevItem = $items.first();
+          $prevItem.toggleClass('disabled', currentPage <= 1);
+
+          // Update page numbers
+          $items.slice(1, -1).each(function(index) {
+            const $pageItem = $(this);
+            const $pageLink = $pageItem.find('.page-link');
+            const pageNumber = index + 1;
+            
+            if (pageNumber <= totalPages) {
+              $pageLink.text(pageNumber);
+              $pageItem.show().toggleClass('active', pageNumber === currentPage);
+            } else {
+              $pageItem.hide();
+            }
+          });
+
+          // Update Next button
+          const $nextItem = $items.last();
+          $nextItem.toggleClass('disabled', currentPage >= totalPages);
+        });
+      }
+
+      // UI state management with jQuery animations
+      function showLoading() {
+        $loadingAlert.removeClass('visually-hidden').hide().fadeIn(200);
+        $feedContainer.html('');
+      }
+
+      function hideLoading() {
+        $loadingAlert.fadeOut(200, function() {
+          $(this).addClass('visually-hidden');
+        });
+      }
+
+      function showError(message, feedUrl) {
+        const errorHtml = `
+          ${_.escape(message)}<br>
+          <small><a href="${_.escape(feedUrl)}" target="_blank" rel="noopener noreferrer">Open feed in a new tab</a></small>
+        `;
+        
+        $errorAlert.find('h5').next().html(errorHtml);
+        $errorAlert.removeClass('visually-hidden').hide().fadeIn(300);
+        $feedContainer.html('');
+      }
+
+      function hideError() {
+        $errorAlert.fadeOut(200, function() {
+          $(this).addClass('visually-hidden');
+        });
+      }
+
+      function stripHtml(html) {
+        return $('<div>').html(html).text();
+      }
+
+      function formatDate(dateString) {
+        if (!dateString) return 'Unknown date';
+        
+        const date = moment(dateString);
+        return date.isValid() ? date.format('MMM D, YYYY') : 'Unknown date';
+      }
+
+      function hashCode(str) {
+        let hash = 0;
+        for (let i = 0; i < str.length; i++) {
+          const char = str.charCodeAt(i);
+          hash = ((hash << 5) - hash) + char;
+          hash = hash & hash; // Convert to 32-bit integer
+        }
+        return hash;
+      }
+
+      // Cache management functions
+      function getCacheInfo() {
+        console.log('=== RSS Feed Cache Status ===');
+        console.log(`Total cached feeds: ${feedCache.size}`);
+        
+        feedCache.forEach((data, url) => {
+          const feedName = $feedButtons.filter(`[data-url="${url}"]`).text().trim() || 'Unknown';
+          const loadedAt = moment(data.loadedAt).format('MMM D, YYYY HH:mm:ss');
+          console.log(`- ${feedName}: ${data.items.length} items (loaded at ${loadedAt})`);
+        });
+        
+        return {
+          totalCached: feedCache.size,
+          urls: Array.from(feedCache.keys())
+        };
+      }
+
+      function clearCache() {
+        feedCache.clear();
+        console.log('RSS feed cache cleared');
+      }
+
+      // Expose cache management globally
+      window.rssFeedCache = {
+        info: getCacheInfo,
+        clear: clearCache,
+        size: () => feedCache.size
+      };
+    });
+  </script>
+</body>
+</html>
