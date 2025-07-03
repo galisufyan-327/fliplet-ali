@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Vue Todo App with Drag & Drop</title>
+
+  <script src="https://cdn.jsdelivr.net/npm/vue@2.6.14/dist/vue.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/vuedraggable@2.24.3/dist/vuedraggable.umd.min.js"></script>
+  
+  <style>
+    body {
+      background: #20262E;
+      padding: 20px;
+      font-family: Helvetica, sans-serif;
+    }
+
+    #app {
+      background: #fff;
+      border-radius: 4px;
+      padding: 20px;
+      transition: all 0.2s;
+    }
+
+    li {
+      margin: 8px 0;
+      padding: 8px;
+      background: #f9f9f9;
+      border-radius: 4px;
+      border: 1px solid #e0e0e0;
+      transition: all 0.2s;
+      cursor: move;
+    }
+
+    li:hover {
+      background: #f0f0f0;
+      border-color: #d0d0d0;
+    }
+
+    li.sortable-ghost {
+      opacity: 0.4;
+      background: #e3f2fd;
+      border: 2px dashed #2196f3;
+    }
+
+    li.sortable-chosen {
+      background: #e8f5e8;
+      border-color: #4caf50;
+      transform: scale(1.02);
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    }
+
+    li.sortable-drag {
+      background: #fff3e0;
+      border-color: #ff9800;
+      box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15);
+    }
+
+    h2 {
+      font-weight: bold;
+      margin-bottom: 15px;
+    }
+
+    del {
+      color: rgba(0, 0, 0, 0.3);
+    }
+
+    .completed {
+      text-decoration: line-through;
+      color: rgba(0, 0, 0, 0.5);
+    }
+
+    input[type="text"] {
+      padding: 10px;
+      width: 200px;
+    }
+
+    label .remove {
+      display: none;
+      color: red;
+    }
+
+    label:hover .remove {
+      display: inline-block;
+      margin-left: 10px;
+      color: red;
+      opacity: 0.5;
+    }
+
+    .visually-hidden {
+      position: absolute !important;
+      width: 1px !important;
+      height: 1px !important;
+      padding: 0 !important;
+      margin: -1px !important;
+      overflow: hidden !important;
+      clip: rect(0, 0, 0, 0) !important;
+      white-space: nowrap !important;
+      border: 0 !important;
+    }
+
+    .drag-area {
+      min-height: 50px;
+      padding: 10px;
+      border: 2px dashed #ddd;
+      border-radius: 6px;
+      background: #fafafa;
+      transition: all 0.3s;
+    }
+    
+    .drag-area.drag-over {
+      border-color: #2196f3;
+      background: #e3f2fd;
+    }
+    
+    .empty-state {
+      text-align: center;
+      color: #999;
+      font-style: italic;
+      padding: 20px;
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <h2>To do: ({{ activeTodos.length }})</h2>
+    <label for="new-todo-input" class="visually-hidden">Add new todo item</label>
+    <input 
+      type="text" 
+      id="new-todo-input" 
+      name="new-todo" 
+      placeholder="Type something and press ENTER"
+      v-model="newTodo"
+      @keyup.enter="addTodo"
+    />
+    
+    <div class="drag-area" :class="{ 'drag-over': activeDragOver }">
+      <draggable 
+        v-model="activeTodos" 
+        tag="ol" 
+        :options="dragOptions"
+        @start="onDragStart"
+        @end="onDragEnd"
+        @change="onDragChange"
+      >
+        <li v-for="todo in activeTodos" :key="todo.id">
+          <label :for="'todo-item-' + todo.id">
+            <input 
+              type="checkbox" 
+              :id="'todo-item-' + todo.id" 
+              name="todo-items" 
+              :value="todo.id"
+              v-model="todo.completed"
+            />
+            <span>{{ todo.text }}</span>
+            <a href="#" class="remove" @click.prevent="removeTodo(todo.id)">Remove</a>
+          </label>
+        </li>
+      </draggable>
+      
+      <div v-if="activeTodos.length === 0" class="empty-state">
+        No active todos. Add one above or drag completed items here!
+      </div>
+    </div>
+    
+    <hr />
+    
+    <h2>
+      Completed items: ({{ completedTodos.length }})
+    </h2>
+    
+    <div class="drag-area" :class="{ 'drag-over': completedDragOver }">
+      <draggable 
+        v-model="completedTodos" 
+        tag="ol" 
+        :options="dragOptions"
+        @start="onDragStart"
+        @end="onDragEnd"
+        @change="onDragChange"
+      >
+        <li v-for="todo in completedTodos" :key="todo.id">
+          <label :for="'completed-item-' + todo.id">
+            <input 
+              type="checkbox" 
+              :id="'completed-item-' + todo.id" 
+              name="completed-items" 
+              :value="todo.id"
+              v-model="todo.completed"
+              checked
+            />
+            <span class="completed">{{ todo.text }}</span>
+            <a href="#" class="remove" @click.prevent="removeTodo(todo.id)">Remove</a>
+          </label>
+        </li>
+      </draggable>
+      
+      <div v-if="completedTodos.length === 0" class="empty-state">
+        No completed todos. Check off items above to move them here!
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Default initial state
+    const DEFAULT_TODOS = [
+      { id: 1, text: "Send job application", completed: true },
+      { id: 2, text: "Learn about Vue", completed: false },
+      { id: 3, text: "Learn about Fliplet", completed: false },
+      { id: 4, text: "Play around in JSFiddle", completed: false },
+      { id: 5, text: "Show us what you've got", completed: false }
+    ];
+    
+    const STORAGE_KEY = 'vue-todo-app';
+    
+    // Load from localStorage or use default
+    function loadTodos() {
+      try {
+        const stored = localStorage.getItem(STORAGE_KEY);
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          return {
+            todos: parsed.todos || DEFAULT_TODOS,
+            nextId: parsed.nextId || (Math.max(...(parsed.todos || DEFAULT_TODOS).map(t => t.id)) + 1)
+          };
+        }
+      } catch (error) {
+        console.warn('Failed to load todos from localStorage:', error);
+      }
+      
+      // Fallback to default
+      return {
+        todos: DEFAULT_TODOS,
+        nextId: Math.max(...DEFAULT_TODOS.map(t => t.id)) + 1
+      };
+    }
+    
+    // Save to localStorage
+    function saveTodos(todos, nextId) {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({ todos, nextId }));
+      } catch (error) {
+        console.warn('Failed to save todos to localStorage:', error);
+      }
+    }
+    
+    // Initialize state
+    const initialState = loadTodos();
+    
+    new Vue({
+      el: "#app",
+      components: {
+        draggable: window.vuedraggable
+      },
+      data: {
+        todos: initialState.todos,
+        newTodo: '',
+        nextId: initialState.nextId,
+        activeDragOver: false,
+        completedDragOver: false,
+        dragOptions: {
+          animation: 200,
+          group: 'todos',
+          disabled: false,
+          ghostClass: 'sortable-ghost',
+          chosenClass: 'sortable-chosen',
+          dragClass: 'sortable-drag'
+        }
+      },
+      computed: {
+        activeTodos: {
+          get() {
+            return this.todos.filter(todo => !todo.completed);
+          },
+          set(newActiveTodos) {
+            this.updateTodoList(newActiveTodos, false);
+          }
+        },
+        completedTodos: {
+          get() {
+            return this.todos.filter(todo => todo.completed);
+          },
+          set(newCompletedTodos) {
+            this.updateTodoList(newCompletedTodos, true);
+          }
+        }
+      },
+      watch: {
+        todos: {
+          handler(newTodos) {
+            saveTodos(newTodos, this.nextId);
+          },
+          deep: true
+        },
+        nextId(newNextId) {
+          saveTodos(this.todos, newNextId);
+        }
+      },
+      methods: {
+        updateTodoList(newTodos, targetCompletedStatus) {
+          // Update completion status for all items in the new list
+          const updatedNewTodos = newTodos.map(todo => ({ 
+            ...todo, 
+            completed: targetCompletedStatus 
+          }));
+          
+          // Get the opposite list (active if updating completed, completed if updating active)
+          const oppositeList = this.todos.filter(todo => todo.completed !== targetCompletedStatus);
+          
+          // Merge lists: active todos first, then completed todos
+          if (targetCompletedStatus) {
+            // If updating completed todos, keep active todos first
+            this.todos = [...oppositeList, ...updatedNewTodos];
+          } else {
+            // If updating active todos, put them first
+            this.todos = [...updatedNewTodos, ...oppositeList];
+          }
+        },
+        addTodo() {
+          if (this.newTodo.trim()) {
+            this.todos.push({ 
+              id: this.nextId++, 
+              text: this.newTodo.trim(), 
+              completed: false 
+            });
+            this.newTodo = '';
+          }
+        },
+        removeTodo(id) {
+          this.todos = this.todos.filter(todo => todo.id !== id);
+        },
+        resetToDefault() {
+          this.todos = JSON.parse(JSON.stringify(DEFAULT_TODOS));
+          this.nextId = Math.max(...DEFAULT_TODOS.map(t => t.id)) + 1;
+        },
+        clearStorage() {
+          localStorage.removeItem(STORAGE_KEY);
+          console.log('Storage cleared');
+        },
+        onDragStart(evt) {
+          console.log('Drag started:', evt);
+        },
+        onDragEnd(evt) {
+          console.log('Drag ended:', evt);
+          this.activeDragOver = false;
+          this.completedDragOver = false;
+        }
+      }
+    });
+  </script>
+</body>
+</html>
